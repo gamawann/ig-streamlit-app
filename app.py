@@ -80,13 +80,14 @@ def is_instagram_result(url: str) -> bool:
 
     return True
 
-def serpapi_google_search(query: str, num_results: int = 10):
+def serpapi_google_search(query: str, num_results: int = 10, start: int = 0):
     endpoint = "https://serpapi.com/search.json"
     params = {
         "engine": "google",
         "q": query,
         "api_key": SERPAPI_KEY,
-        "num": min(max(num_results, 1), 10),
+        "num": min(max(num_results, 1), 10),   # per request max 10
+        "start": start,                        # pagination offset
         "hl": "id",
         "gl": "id",
     }
@@ -101,8 +102,7 @@ def serpapi_google_search(query: str, num_results: int = 10):
             st.text(resp.text)
         resp.raise_for_status()
 
-    data = resp.json()
-    return data
+    return resp.json()
 
 def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
     output = BytesIO()
@@ -124,7 +124,7 @@ with col2:
 with col3:
     end_date = st.date_input("Sampai tanggal")
 
-max_results = st.slider("Jumlah hasil", min_value=1, max_value=10, value=10, step=1)
+max_results = st.slider("Jumlah hasil", min_value=10, max_value=50, value=20, step=10)
 show_raw = st.checkbox("Tampilkan raw API results", value=False)
 
 run_search = st.button("Search")
@@ -138,25 +138,35 @@ if run_search:
     elif start_date > end_date:
         st.warning("Tanggal awal tidak boleh lebih besar dari tanggal akhir.")
     elif not SERPAPI_KEY:
-        st.error("Isi SERPAPI_KEY dulu di .streamlit/secrets.toml")
+        st.error("Isi SERPAPI_KEY dulu di Streamlit secrets.")
     else:
         query = build_query(keyword)
         st.subheader("Query")
         st.code(query)
 
         try:
-            data = serpapi_google_search(query=query, num_results=max_results)
+            all_items = []
+            raw_pages = []
+
+            # ambil per 10 hasil
+            for start in range(0, max_results, 10):
+                data = serpapi_google_search(query=query, num_results=10, start=start)
+                raw_pages.append(data)
+
+                organic_results = data.get("organic_results", [])
+                if not organic_results:
+                    break
+
+                all_items.extend(organic_results)
 
             if show_raw:
                 st.subheader("Raw API Results")
-                st.json(data)
-
-            organic_results = data.get("organic_results", [])
+                st.json(raw_pages)
 
             rows = []
             seen = set()
 
-            for item in organic_results:
+            for item in all_items:
                 link = item.get("link", "").strip()
                 title = item.get("title", "").strip()
                 snippet = item.get("snippet", "").strip()
